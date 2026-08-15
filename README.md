@@ -9,7 +9,7 @@ An installable DeepSeek Harness profile bundle that uses an auxiliary LLM call t
 Requires DeepSeek Harness `0.1.0-rc.6` or later and an authenticated GitHub checkout for this repository.
 
 ```sh
-dsh plugin --profile web add --ignore-workspace-root-check github:lizhecome/deepseek-harness-prompt-optimizer
+dsh plugin --profile web add --ignore-workspace-root-check git+https://github.com/lizhecome/deepseek-harness-prompt-optimizer.git
 ```
 
 Use `headless` instead of `web` to enable it for one-shot tasks. The package manifest declares a `dsh.bundle` patch, so installation mounts the optimizer and its invariant companion automatically.

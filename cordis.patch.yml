@@ -1,5 +1,5 @@
 # Install this bundle with:
-#   dsh plugin --profile <web|headless> add --ignore-workspace-root-check github:lizhecome/deepseek-harness-prompt-optimizer
+#   dsh plugin --profile <web|headless> add --ignore-workspace-root-check git+https://github.com/lizhecome/deepseek-harness-prompt-optimizer.git
 
 - insert:
     - id: prompt-optimizer

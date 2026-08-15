@@ -9,7 +9,7 @@
 要求 DeepSeek Harness `0.1.0-rc.6` 或更高版本，并且本机具备访问此 GitHub 仓库的凭据。
 
 ```sh
-dsh plugin --profile web add --ignore-workspace-root-check github:lizhecome/deepseek-harness-prompt-optimizer
+dsh plugin --profile web add --ignore-workspace-root-check git+https://github.com/lizhecome/deepseek-harness-prompt-optimizer.git
 ```
 
 若要用于一次性任务，可将 `web` 改为 `headless`。包清单声明了 `dsh.bundle` patch，因此安装后会自动挂载优化器及其 invariant companion。
