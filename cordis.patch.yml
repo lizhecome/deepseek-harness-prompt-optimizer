@@ -1,0 +1,20 @@
+# Install this bundle with:
+#   dsh plugin --profile <web|headless> add --ignore-workspace-root-check github:lizhecome/deepseek-harness-prompt-optimizer
+
+- insert:
+    - id: prompt-optimizer
+      name: '@lizhecome/dsh-prompt-optimizer'
+      config:
+        # Leave both empty to use the current agent's route.
+        provider: ''
+        model: ''
+        maxTokens: 1024
+        minChars: 20
+        # append keeps the original user message and adds a sourced notice;
+        # replace sends only the optimized text to the main model.
+        delivery: append
+        # pass-through preserves the original prompt after an optimizer error.
+        failureMode: pass-through
+
+    - id: prompt-optimizer-invariant
+      name: '@lizhecome/dsh-prompt-optimizer/invariant'
