@@ -1,12 +1,12 @@
 # DeepSeek Harness Prompt Optimizer
 
-An installable DeepSeek Harness profile bundle that uses an auxiliary LLM call to improve direct user prompts before the main agent request. It is an ordinary Cordis plugin on the cooperative `agent/pre-step` waterfall; it does not patch the agent loop.
+An installable DeepSeek Harness profile bundle that uses an auxiliary LLM call to improve prompts. The Web UI adds a sparkle button beside Send, and the host plugin can also optimize direct user messages on the cooperative `agent/pre-step` waterfall. It does not patch the agent loop.
 
 [中文说明](README.zh.md)
 
 ## Install
 
-Requires DeepSeek Harness `0.1.0-rc.6` or later and GitHub CLI access to this private repository.
+Requires DeepSeek Harness `0.1.0-rc.6` or later.
 
 ```sh
 gh repo clone lizhecome/deepseek-harness-prompt-optimizer
@@ -14,7 +14,7 @@ cd deepseek-harness-prompt-optimizer
 dsh plugin --profile web add --ignore-workspace-root-check .
 ```
 
-Use `headless` instead of `web` to enable it for one-shot tasks. DeepSeek Harness anchors `add .` to the invoking checkout before pnpm switches to the profile directory. The package manifest declares a `dsh.bundle` patch, so installation mounts the optimizer and its invariant companion automatically.
+Use `headless` instead of `web` to enable automatic optimization for one-shot tasks. The composer button is available only in the `web` profile. DeepSeek Harness anchors `add .` to the invoking checkout before pnpm switches to the profile directory. The package manifest declares a `dsh.bundle` patch and a Web client entry, so installation mounts the host optimizer, invariant companion, and composer control automatically.
 
 To remove it:
 
@@ -23,6 +23,16 @@ dsh plugin --profile web remove --ignore-workspace-root-check @lizhecome/dsh-pro
 ```
 
 ## Behavior
+
+### Composer button
+
+The Web UI contributes a sparkle button to `conversation.input.right`, immediately before the normal send control. It is disabled while the draft is blank or the composer is busy. Clicking it runs one auxiliary request and replaces the unsent draft with the rewritten text.
+
+The button compares both the draft revision and exact text before applying the response. If the user edits while optimization is running, the response is not applied and the current draft is preserved. Transport, routing, and model failures also preserve the draft and place the failure in the button's accessible status and tooltip.
+
+The host exposes the same operation as `/optimize-prompt <prompt>`. The button marks its successful result for a one-time exact-match bypass: sending that unchanged result does not trigger a second automatic optimization. Editing the result removes that match, so the normal automatic policy applies when it is sent.
+
+### Automatic optimization
 
 The listener delegates first, then inspects the final `PreStepDecision`. It optimizes only direct-user messages whose blocks are all text and whose trimmed length reaches `minChars`. Plugin context, tool results, goal rounds, relays, images, and short prompts pass through unchanged.
 
@@ -68,7 +78,7 @@ Later profile patches replace a row's complete `config`, so restate every field 
 
 ## Model and cost effects
 
-Every eligible prompt adds one independent model request. Its input is the direct user message plus the optimizer system instruction, and its output is bounded by `maxTokens`. `append` makes the main request longer because it contains both versions; `replace` avoids that duplication but does not retain the original prompt in durable history. Auxiliary requests reuse the session id for routing but do not reuse the main conversation prefix.
+Every prompt eligible for automatic optimization adds one independent model request. A button click also adds one request, but sending its unchanged result consumes the one-time bypass and does not add another optimizer request. If the result is edited before sending, normal automatic eligibility applies. Each optimizer input is the draft or direct user message plus the optimizer system instruction, and its output is bounded by `maxTokens`. `append` makes an automatically optimized main request longer because it contains both versions; `replace` avoids that duplication but does not retain the original prompt in durable history. Auxiliary requests reuse the session id for routing but do not reuse the main conversation prefix.
 
 The built-in instruction tells the optimizer to preserve language, facts, identifiers, quoted text, constraints, and requested output format; remove ambiguity and redundancy; avoid inventing requirements; and return only a rewritten prompt.
 
@@ -76,7 +86,7 @@ The built-in instruction tells the optimizer to preserve language, facts, identi
 
 - Multimodal and mixed-block direct-user messages pass through unchanged.
 - Prompt optimization is semantic model output, so it can still distort intent; use `append` when auditability matters.
-- The auxiliary call is not itself stored as a separate session event. Its delivered output is stored in the main turn.
+- The auxiliary model exchange is not stored as a separate model event. Button results are stored in the durable command lifecycle, while automatically delivered output is stored in the main turn.
 
 ## Development
 
@@ -85,4 +95,4 @@ pnpm install
 pnpm run check
 ```
 
-The tests boot the published Harness services and a real agent loop with a deterministic in-process LLM adapter. They verify durable append/replace behavior, failure fallback, short-prompt bypass, and listener disposal.
+The tests boot the published Harness services and a real agent loop with a deterministic in-process LLM adapter. They verify durable append/replace behavior, failure fallback, short-prompt bypass, command execution, one-time deduplication, listener disposal, DOM replacement, and concurrent-edit protection.

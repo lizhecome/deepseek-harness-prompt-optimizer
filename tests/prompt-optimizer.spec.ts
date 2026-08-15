@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
 import LlmRuntime, {
   createUserMessage,
   LlmAdapter,
@@ -50,6 +51,7 @@ async function harness(config: Config = {}): Promise<{
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(LlmRuntime)
+  await ctx.plugin(CommandRuntime)
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
@@ -163,6 +165,7 @@ describe('prompt optimizer', () => {
     const ctx = new Context()
     contexts.push(ctx)
     await ctx.plugin(LlmRuntime)
+    await ctx.plugin(CommandRuntime)
     await ctx.plugin(SessionStore)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
@@ -187,8 +190,53 @@ describe('prompt optimizer', () => {
     const ctx = new Context()
     contexts.push(ctx)
     await ctx.plugin(LlmRuntime)
+    await ctx.plugin(CommandRuntime)
 
     await expect(ctx.plugin(PromptOptimizer, { provider: 'mock' }))
       .rejects.toThrow('`provider` and `model` must be set together')
+  })
+
+  it('returns an optimized composer draft and skips the next automatic rewrite once', async () => {
+    const { ctx, adapter, agent } = await harness()
+    const execution = await ctx.commands.execute(
+      agent,
+      '/optimize-prompt --button\nPlease implement the requested feature.',
+      new AbortController().signal,
+    )
+
+    expect(execution?.result).toEqual({
+      kind: 'success',
+      text: 'Optimized: implement the feature and verify its behavior.',
+    })
+    await submit(agent, 'Optimized: implement the feature and verify its behavior.')
+
+    expect(adapter.requests).toHaveLength(2)
+    expect(adapter.requests[1]?.system).not.toBe(PromptOptimizer.DEFAULT_INSTRUCTION)
+    expect(adapter.requests[1]?.messages[0]?.content).toEqual([
+      { type: 'text', text: 'Optimized: implement the feature and verify its behavior.' },
+    ])
+    const commandRun = [...agent.session.events].find(event => event.type === 'command/run')
+    expect(commandRun).toMatchObject({
+      type: 'command/run',
+      data: { name: 'optimize-prompt' },
+    })
+    expect(commandRun?.type === 'command/run' && 'args' in commandRun.data).toBe(false)
+  })
+
+  it('does not arm the automatic bypass when an explicit optimization fails', async () => {
+    const { ctx, adapter, agent } = await harness()
+    adapter.failOptimizer = true
+
+    const execution = await ctx.commands.execute(
+      agent,
+      '/optimize-prompt --button\nPlease implement the requested feature.',
+      new AbortController().signal,
+    )
+
+    expect(execution?.result).toEqual({ kind: 'error', text: 'optimizer unavailable' })
+    adapter.failOptimizer = false
+    await submit(agent, 'Please implement the requested feature.')
+    expect(adapter.requests).toHaveLength(3)
+    expect(adapter.requests[1]?.system).toBe(PromptOptimizer.DEFAULT_INSTRUCTION)
   })
 })

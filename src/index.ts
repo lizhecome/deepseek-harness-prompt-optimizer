@@ -6,6 +6,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import {
   BlockAssembler,
   createUserMessage,
@@ -15,7 +16,9 @@ import type { FinishReason, UserMessage } from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
 
 export const name = 'prompt-optimizer'
-export const inject = ['llm']
+export const inject = ['llm', 'commands']
+
+const BUTTON_INPUT_PREFIX = '--button\n'
 
 /** Stable default directive sent only to the auxiliary optimizer call. */
 export const DEFAULT_INSTRUCTION = [
@@ -213,6 +216,62 @@ function deliver(message: UserMessage, optimized: string, delivery: Delivery): U
   ]
 }
 
+/** Record one exact button-produced draft so the automatic listener does not rewrite it again. */
+function markManualDelivery(deliveries: WeakMap<Agent, Set<string>>, agent: Agent, text: string): void {
+  const pending = deliveries.get(agent) ?? new Set<string>()
+  pending.add(text)
+  deliveries.set(agent, pending)
+}
+
+/** Consume one exact button-produced draft; edited drafts continue through normal automatic optimization. */
+function consumeManualDelivery(
+  deliveries: WeakMap<Agent, Set<string>>,
+  agent: Agent,
+  text: string,
+): boolean {
+  const pending = deliveries.get(agent)
+  if (pending === undefined || !pending.delete(text)) return false
+  if (pending.size === 0) deliveries.delete(agent)
+  return true
+}
+
+/** Remove the command separator and the private composer-button marker. */
+function parseCommandInput(rawInput: string): { fromButton: boolean; text: string } {
+  const input = /^[\t ]/u.test(rawInput) ? rawInput.slice(1) : rawInput
+  const fromButton = input.startsWith(BUTTON_INPUT_PREFIX)
+  return {
+    fromButton,
+    text: (fromButton ? input.slice(BUTTON_INPUT_PREFIX.length) : input).trim(),
+  }
+}
+
+/** Execute one explicit optimization request for the composer button or slash-command fallback. */
+async function executeCommand(
+  ctx: Context,
+  config: ResolvedConfig,
+  deliveries: WeakMap<Agent, Set<string>>,
+  invocation: CommandInvocation,
+): Promise<CommandResult> {
+  const { fromButton, text } = parseCommandInput(invocation.rawInput)
+  if (text.length === 0) return { kind: 'error', text: 'Enter a prompt to optimize.' }
+
+  try {
+    const optimized = await optimize(
+      ctx,
+      createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }),
+      resolveTarget(config.configuredTarget, invocation.agent),
+      config,
+      invocation.agent,
+      invocation.signal,
+    )
+    if (fromButton) markManualDelivery(deliveries, invocation.agent, optimized)
+    return { kind: 'success', text: optimized }
+  } catch (error) {
+    if (invocation.signal.aborted) throw error
+    return { kind: 'error', text: errorText(error) }
+  }
+}
+
 /**
  * Install the prompt optimizer on the cooperative `agent/pre-step` waterfall.
  * @param ctx - plugin context providing the LLM service.
@@ -221,6 +280,15 @@ function deliver(message: UserMessage, optimized: string, delivery: Delivery): U
 export function apply(ctx: Context, config: Config): void {
   const resolved = resolveConfig(config)
   const logger = ctx.logger('prompt-optimizer')
+  const manualDeliveries = new WeakMap<Agent, Set<string>>()
+
+  ctx.effect(() => ctx.commands.register({
+    name: 'optimize-prompt',
+    description: 'rewrite a prompt for precise agent execution',
+    input: { hint: '<prompt>' },
+    recordInput: false,
+    handler: invocation => executeCommand(ctx, resolved, manualDeliveries, invocation),
+  }), 'prompt-optimizer: command')
 
   ctx.on('agent/pre-step', async ({ agent, signal }, next): Promise<PreStepDecision> => {
     const downstream = await next()
@@ -228,6 +296,11 @@ export function apply(ctx: Context, config: Config): void {
 
     const messages: UserMessage[] = []
     for (const message of downstream.messages) {
+      const directText = optimizableText(message, 0)
+      if (directText !== undefined && consumeManualDelivery(manualDeliveries, agent, directText)) {
+        messages.push(message)
+        continue
+      }
       const text = optimizableText(message, resolved.minChars)
       if (text === undefined) {
         messages.push(message)

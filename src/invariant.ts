@@ -9,9 +9,9 @@ export const name = 'prompt-optimizer-invariant'
 export const inject = ['invariants']
 
 /**
- * No runtime invariant: the plugin owns one effect-scoped waterfall listener
- * and retains no mutable state; its real-loop tests cover message durability
- * and disposal.
+ * No runtime invariant: the listener and command are effect-scoped, while the
+ * one-shot composer bypass is held in a WeakMap keyed by live agents. Real-loop
+ * tests cover message durability, exact-match consumption, and disposal.
  */
 const install: InvariantInstaller = () => {}
 
